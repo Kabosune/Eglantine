@@ -204,6 +204,16 @@ AppLoader::LoadResult AppLoader_NUP::Load(Kernel::KProcess& process, Core::Syste
         return result;
     }
 
+    // The RomFS is not updatable (the update is merged in ReadRomFS), so RomFSFactory never
+    // runs it through PatchManager; apply LayeredFS here so mods in load/<titleid>/ work.
+    if (FileSys::VirtualFile romfs; ReadRomFS(romfs) == ResultStatus::Success) {
+        const FileSys::PatchManager patch_manager(base_title_id, system.GetFileSystemController(),
+                                                  system.GetContentProvider());
+        if (auto patched = patch_manager.PatchRomFS(nullptr, romfs); patched != nullptr) {
+            patched_romfs = std::move(patched);
+        }
+    }
+
     system.GetFileSystemController().RegisterProcess(
         process.GetProcessId(), base_title_id,
         std::make_shared<FileSys::RomFSFactory>(*this, system.GetContentProvider(),
@@ -222,6 +232,11 @@ ResultStatus AppLoader_NUP::VerifyIntegrity(
 }
 
 ResultStatus AppLoader_NUP::ReadRomFS(FileSys::VirtualFile& out_file) {
+    if (patched_romfs != nullptr) {
+        out_file = patched_romfs;
+        return ResultStatus::Success;
+    }
+
     const auto base_index = nup->FindBasePackage();
     const auto base_romfs = base_index ? nup->GetRomFSDir(*base_index) : FileSys::VirtualDir{};
     const auto update_index = nup->FindBestUpdatePackage();
